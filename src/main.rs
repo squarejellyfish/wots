@@ -1,3 +1,4 @@
+use core::panic;
 use std::io::ErrorKind;
 use std::os::unix::fs;
 use std::env;
@@ -12,7 +13,7 @@ const HOME: &'static str = env!("HOME");
 struct Cli {
     /// Path to the file to symlink
     file_name: PathBuf,
-    /// Target directory
+    /// Target directory, default is home directory
     #[arg(short, long, value_name = "DIR", default_value = PathBuf::from(HOME).into_os_string())]
     target_path: PathBuf,
     /// Force the link if the link already exists
@@ -45,11 +46,15 @@ fn main() -> std::io::Result<()> {
     let file_name_abs = args.file_name_abs();
     let target: PathBuf = args.target();
 
-    println!("{target:?}");
+    eprintln!("target_path: {target:?}");
     match fs::symlink(file_name_abs, target) {
         Ok(()) => (),
         Err(error) => match error.kind() {
-            ErrorKind::AlreadyExists => panic!("Symlink already exists. Use flag -f or --force for force link."),
+            ErrorKind::AlreadyExists => match args.force {
+                false => panic!("Symlink already exists. Use flag -f or --force for force link."),
+                // TODO: implement force link
+                true => panic!("Error: force link not implemented")
+            }
             other_error => panic!("Error: cannot create symlink: {other_error:?}")
         }
     }
