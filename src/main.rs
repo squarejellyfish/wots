@@ -46,14 +46,21 @@ fn main() -> std::io::Result<()> {
     let file_name_abs = args.file_name_abs();
     let target: PathBuf = args.target();
 
+    if target.is_symlink() {
+        match args.force {
+            true => std::fs::remove_file(&target)?,
+            false => panic!("Symlink already exists. Use flag -f or --force for force link."),
+        }
+    }
+
     eprintln!("target_path: {target:?}");
-    match fs::symlink(file_name_abs, target) {
+    match fs::symlink(file_name_abs, &target) {
         Ok(()) => (),
         Err(error) => match error.kind() {
             ErrorKind::AlreadyExists => match args.force {
-                false => panic!("Symlink already exists. Use flag -f or --force for force link."),
+                false => panic!(""),
                 // TODO: implement force link
-                true => panic!("Error: force link not implemented")
+                true => std::fs::remove_file(target)?
             }
             other_error => panic!("Error: cannot create symlink: {other_error:?}")
         }
