@@ -1,8 +1,7 @@
 use core::panic;
 use std::io::ErrorKind;
-use std::os::unix::fs;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use clap::Parser;
 
 const HOME: &'static str = env!("HOME");
@@ -47,14 +46,48 @@ fn main() -> std::io::Result<()> {
     }
 
     let file_name_abs = args.file_name_abs();
-    let target: PathBuf = args.target();
-
-    match args.delete {
-        true => delete_link(target)?,
-        false => create_link(file_name_abs, target, args.force)?,
+    // check if the file wotsing is the current_dir
+    if file_name_abs == env::current_dir()? {
+        link_whole_dir(args.force)?;
     }
 
-    Ok(())
+    let target: PathBuf = args.target();
+
+    if args.delete {
+        return delete_link(target)
+    } 
+    create_link(file_name_abs, target, args.force)
+}
+
+fn link_whole_dir(force: bool) -> std::io::Result<()> {
+    let entries = std::fs::read_dir(".")?;
+    let ignore_files = get_ignore_files();
+    println!("Files in current directory:");
+    for entry in entries {
+        println!("\t{entry:?}")
+    }
+    println!("Files to ignore:");
+    for file in ignore_files {
+        println!("\t{file:?}")
+    }
+    todo!("wotsing the whole directory is not yet implemented.")
+}
+
+fn get_ignore_files() -> Vec<String> {
+    let file_name = if Path::new("./.wots-ignore").exists() {
+        Path::new("./.wots-ignore")
+    } else if Path::new("~/.wots-global-ignore").exists() {
+        Path::new("~/.wots-global-ignore")
+    } else {
+        panic!("Error: global wots ignore file does not exist");
+    };
+
+    let contents = std::fs::read_to_string(file_name).unwrap_or_else(|_| panic!("Error: cannot read wots-ignore file: {}", file_name.to_string_lossy()));
+    let mut ignore_files: Vec<String> = Vec::new();
+    for line in contents.lines() {
+        ignore_files.push(line.to_string());
+    }
+    ignore_files
 }
 
 fn create_link(file_name_abs: PathBuf, target: PathBuf, force: bool) -> std::io::Result<()> {
@@ -66,7 +99,7 @@ fn create_link(file_name_abs: PathBuf, target: PathBuf, force: bool) -> std::io:
     }
 
     eprintln!("target_path: {target:?}");
-    match fs::symlink(file_name_abs, &target) {
+    match std::os::unix::fs::symlink(file_name_abs, &target) {
         Ok(()) => Ok(()),
         Err(error) => match error.kind() {
             ErrorKind::AlreadyExists => unreachable!(),
