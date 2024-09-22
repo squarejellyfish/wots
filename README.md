@@ -3,9 +3,9 @@
 ## Installation
 
 ```sh
-$ git clone https://github.com/squarejellyfish/wots.git
-$ cd wots
-$ make install
+git clone https://github.com/squarejellyfish/wots.git
+cd wots
+make install
 ```
 
 This installation will generate some global files, build the binary, and install it (defaults to `/usr/local/bin/`).
@@ -13,10 +13,16 @@ This installation will generate some global files, build the binary, and install
 To only build the binary and install manually, just do:
 
 ```sh
-$ make manual
+make manual
 ```
 
 And copy or link `/target/release/wots` to the designated directory.
+
+Or even better, use wots to link it to where your binaries live:
+
+```
+./target/release/wots ./target/release/wots -t path/to/binaries
+```
 
 ## Usage
 
