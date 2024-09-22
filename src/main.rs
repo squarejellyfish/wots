@@ -1,16 +1,17 @@
-use core::panic;
 use std::io::ErrorKind;
 use std::env;
 use std::path::{Path, PathBuf};
 use clap::Parser;
+use regex::Regex;
 
 const HOME: &'static str = env!("HOME");
 
-/// A light-weight stow copy
+/// GNU stow, but much simpler and light-weighted
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Cli {
-    /// Path to the file to symlink
+    /// Path to the file to symlink, set to "." will link all the files in current directory.
+    /// Respects .gitignore
     file_name: PathBuf,
     /// Target directory, default is home directory
     #[arg(short, long, value_name = "DIR", default_value = PathBuf::from(HOME).into_os_string())]
@@ -18,7 +19,7 @@ struct Cli {
     /// Delete (unstow) the package from the target directory if this option is on
     #[arg(short, long, default_value_t = false)]
     delete: bool,
-    /// Force the link if the link already exists
+    /// Force the link(s) if already exists
     #[arg(short, long, default_value_t = false)]
     force: bool,
 }
@@ -48,7 +49,11 @@ fn main() -> std::io::Result<()> {
     let file_name_abs = args.file_name_abs();
     // check if the file wotsing is the current_dir
     if file_name_abs == env::current_dir()? {
-        link_whole_dir(args.force)?;
+        if args.delete {
+            unimplemented!("Unlinking the whole directory is not implemented.")
+        }
+        link_whole_dir(&args)?;
+        return Ok(())
     }
 
     let target: PathBuf = args.target();
@@ -59,18 +64,49 @@ fn main() -> std::io::Result<()> {
     create_link(file_name_abs, target, args.force)
 }
 
-fn link_whole_dir(force: bool) -> std::io::Result<()> {
-    let entries = std::fs::read_dir(".")?;
+fn link_whole_dir(args: &Cli) -> std::io::Result<()> {
+    let entries = std::fs::read_dir(".").expect("Error: cannot read the current directory");
     let ignore_files = get_ignore_files();
-    println!("Files in current directory:");
+
+    // println!("Files to ignore:");
+    // for file in &ignore_files {
+    //     println!("\t{file:?}")
+    // }
+
     for entry in entries {
-        println!("\t{entry:?}")
+        let entry = entry.expect("Error: cannot read directory").path();
+        if !should_ignore(&entry, &ignore_files) {
+            let entry_abs = std::path::absolute(&entry).unwrap();
+            let target = PathBuf::from(HOME).join(entry.file_name().expect("Error: cannot get file name"));
+            create_link(entry_abs, target, args.force)?;
+        }
     }
-    println!("Files to ignore:");
-    for file in ignore_files {
-        println!("\t{file:?}")
+    Ok(())
+}
+
+fn should_ignore(entry: &PathBuf, ignore_files: &[String]) -> bool {
+    let entry_str = match entry.strip_prefix(".") {
+        Ok(result) => result.to_str().unwrap(),
+        Err(err) => panic!("Error: {err}: {entry:?}")
+    };
+    for ignore_file in ignore_files {
+        let re = Regex::new(match ignore_file.strip_suffix('/') {
+            Some(result) => result,
+            None => ignore_file,
+        }).unwrap_or_else(|e| {
+            println!("Error: cannot parse {} to regex string: {}", ignore_file, e);
+            panic!("This may cause unexpected behaviour of linking, aborting all operations.")
+        });
+
+        let result = re.is_match(entry_str);
+        if result { return true }
+
+        let entry_str_prefix = Path::new("/").join(entry_str);
+        let result_prefix = re.is_match(entry_str_prefix.to_str().unwrap());
+
+        if result_prefix { return true }
     }
-    todo!("wotsing the whole directory is not yet implemented.")
+    false
 }
 
 fn get_ignore_files() -> Vec<String> {
@@ -81,12 +117,29 @@ fn get_ignore_files() -> Vec<String> {
     } else {
         panic!("Error: global wots ignore file does not exist");
     };
+    let file_name_git = Path::new("./.gitignore");
 
-    let contents = std::fs::read_to_string(file_name).unwrap_or_else(|_| panic!("Error: cannot read wots-ignore file: {}", file_name.to_string_lossy()));
     let mut ignore_files: Vec<String> = Vec::new();
+    // get .gitignore files
+    if file_name_git.exists() {
+        let contents = std::fs::read_to_string(file_name_git).unwrap_or_else(|_| panic!("Error: cannot read file: {}", file_name_git.to_string_lossy()));
+        for line in contents.lines() {
+            if line.is_empty() {
+                continue
+            }
+            ignore_files.push(line.to_string());
+        }
+    }
+
+    // get .wots-ignore files
+    let contents = std::fs::read_to_string(file_name).unwrap_or_else(|_| panic!("Error: cannot read wots-ignore file: {}", file_name.to_string_lossy()));
     for line in contents.lines() {
+        if line.is_empty() {
+            continue
+        }
         ignore_files.push(line.to_string());
     }
+    ignore_files.push(String::from(".wots-ignore"));
     ignore_files
 }
 
@@ -98,11 +151,11 @@ fn create_link(file_name_abs: PathBuf, target: PathBuf, force: bool) -> std::io:
         }
     }
 
-    eprintln!("target_path: {target:?}");
+    println!("Linking {} to {}...", file_name_abs.to_str().unwrap(), target.to_str().unwrap());
     match std::os::unix::fs::symlink(file_name_abs, &target) {
         Ok(()) => Ok(()),
         Err(error) => match error.kind() {
-            ErrorKind::AlreadyExists => unreachable!(),
+            ErrorKind::AlreadyExists => panic!("Error: cannot create symlink: {} already exists, and it's not a symlink", target.to_str().unwrap()),
             other_error => panic!("Error: cannot create symlink: {other_error:?}")
         }
     }
